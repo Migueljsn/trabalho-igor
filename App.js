@@ -1,7 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  Button,
   FlatList,
   Image,
   SafeAreaView,
@@ -14,13 +13,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { supabase } from "./src/lib/supabase";
 
 // Este projeto foi escrito em um único arquivo para facilitar o estudo.
 // Em um projeto maior, cada tela poderia ficar em uma pasta como src/screens.
+// A proposta aqui é deixar tudo visível para apresentação: telas, estados,
+// funções de CRUD, conexão com Supabase e estilos.
 
 // Imagem em formato PNG base64 para cumprir o requisito do componente Image
-// sem depender de arquivo externo ou internet. Ela aparece como um bloco verde
-// no topo da tela de login.
+// sem depender de arquivo externo ou internet. Ela fica dentro do bloco visual
+// da tela de login, seguindo a estética clara e arredondada do protótipo.
 const APP_IMAGE =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
@@ -46,13 +48,10 @@ const INITIAL_TASKS = [
   },
 ];
 
-// Função simples para gerar ids sem banco de dados.
-// Para o ponto extra, o README explica como substituir esta parte por Firebase.
-function createId() {
-  return String(Date.now());
-}
-
 export default function App() {
+  // Este componente é o "controlador" principal do aplicativo.
+  // Ele guarda os estados compartilhados e decide qual tela será exibida.
+
   // screen controla qual tela aparece. Isso simula a navegação entre telas
   // de forma bem simples para fins acadêmicos.
   const [screen, setScreen] = useState("login");
@@ -60,8 +59,16 @@ export default function App() {
   // user guarda os dados básicos do usuário logado.
   const [user, setUser] = useState(null);
 
-  // tasks é o "estado global" da lista de tarefas do app.
+  // tasks é o "estado global" da lista de tarefas do app. Ele começa com
+  // dados locais para a interface nunca abrir vazia durante o carregamento.
   const [tasks, setTasks] = useState(INITIAL_TASKS);
+
+  // loadingTasks indica que o app está buscando dados no Supabase.
+  const [loadingTasks, setLoadingTasks] = useState(false);
+
+  // usingLocalData fica true quando o banco não está acessível ou a tabela
+  // ainda não existe. Assim o app continua funcionando para demonstração.
+  const [usingLocalData, setUsingLocalData] = useState(false);
 
   // selectedTaskId guarda qual tarefa foi escolhida na tela principal.
   const [selectedTaskId, setSelectedTaskId] = useState(null);
@@ -82,6 +89,36 @@ export default function App() {
   // Cores mudam conforme o modo escuro configurado pelo usuário.
   const theme = settings.darkMode ? darkTheme : lightTheme;
 
+  // useEffect executa uma vez quando o app inicia. Aqui ele carrega as tarefas
+  // salvas no Supabase e substitui a lista inicial caso a conexão funcione.
+  useEffect(() => {
+    loadTasks();
+  }, []);
+
+  // Busca as tarefas no Supabase. A tabela esperada chama-se public.tasks.
+  async function loadTasks() {
+    setLoadingTasks(true);
+
+    // select escolhe apenas os campos usados pela tela. order coloca as
+    // tarefas mais novas primeiro, usando a coluna created_at.
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("id,title,description,done")
+      .order("created_at", { ascending: false });
+
+    setLoadingTasks(false);
+
+    if (error) {
+      // Se ocorrer erro, mantemos os dados locais iniciais e avisamos na tela
+      // principal com o texto "Modo local".
+      setUsingLocalData(true);
+      return;
+    }
+
+    setUsingLocalData(false);
+    setTasks(data);
+  }
+
   function handleLogin(email) {
     // Validação simples apenas para demonstrar regra de formulário.
     if (!email.includes("@")) {
@@ -89,11 +126,15 @@ export default function App() {
       return;
     }
 
+    // O login é simulado para manter o projeto simples. Ele cria um usuário
+    // local e leva o app para a tela principal.
     setUser({ name: "Estudante", email });
     setScreen("home");
   }
 
   function handleRegister(name, email) {
+    // Cadastro também é simulado. O objetivo é cumprir a tela e demonstrar
+    // validação básica de formulário, sem autenticação real.
     if (!name.trim() || !email.includes("@")) {
       Alert.alert("Atenção", "Preencha nome e e-mail corretamente.");
       return;
@@ -103,26 +144,64 @@ export default function App() {
     setScreen("home");
   }
 
-  function handleAddTask(title, description) {
+  async function handleAddTask(title, description) {
+    // Antes de salvar no banco, o app valida se o campo obrigatório foi enviado.
     if (!title.trim()) {
       Alert.alert("Atenção", "O título da tarefa é obrigatório.");
       return;
     }
 
+    // Objeto que será enviado para a tabela tasks no Supabase.
     const newTask = {
-      id: createId(),
       title: title.trim(),
       description: description.trim() || "Sem descrição.",
       done: false,
     };
 
-    // O spread operator cria uma nova lista, mantendo o estado imutável.
-    setTasks((currentTasks) => [newTask, ...currentTasks]);
+    // insert salva no banco e select retorna a tarefa criada com o id gerado.
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert(newTask)
+      .select("id,title,description,done")
+      .single();
+
+    if (error) {
+      // Fallback local: se o Supabase falhar, a tarefa entra na lista em memória.
+      // Isso facilita a apresentação mesmo sem internet ou sem tabela criada.
+      const localTask = { ...newTask, id: String(Date.now()) };
+      setUsingLocalData(true);
+      setTasks((currentTasks) => [localTask, ...currentTasks]);
+      Alert.alert("Aviso", "Tarefa salva apenas no aparelho. Verifique a tabela tasks.");
+      setScreen("home");
+      return;
+    }
+
+    // Atualização otimista da interface depois do banco confirmar a criação.
+    setUsingLocalData(false);
+    setTasks((currentTasks) => [data, ...currentTasks]);
     setScreen("home");
   }
 
-  function handleUpdateTask(updatedTask) {
-    // map percorre as tarefas e troca apenas a tarefa editada.
+  async function handleUpdateTask(updatedTask) {
+    // update altera apenas os campos editáveis da tarefa selecionada.
+    const { error } = await supabase
+      .from("tasks")
+      .update({
+        title: updatedTask.title.trim(),
+        description: updatedTask.description.trim() || "Sem descrição.",
+        done: updatedTask.done,
+      })
+      .eq("id", updatedTask.id);
+
+    if (error) {
+      setUsingLocalData(true);
+      Alert.alert("Aviso", "Alteração feita apenas no aparelho. Verifique o Supabase.");
+    } else {
+      setUsingLocalData(false);
+    }
+
+    // Mesmo com falha remota, atualizamos a tela localmente para manter o fluxo
+    // simples para o usuário.
     setTasks((currentTasks) =>
       currentTasks.map((task) => (task.id === updatedTask.id ? updatedTask : task))
     );
@@ -130,14 +209,25 @@ export default function App() {
     setScreen("home");
   }
 
-  function handleDeleteTask(taskId) {
-    // filter remove a tarefa cujo id é igual ao selecionado.
+  async function handleDeleteTask(taskId) {
+    // delete remove a tarefa no Supabase pelo id.
+    const { error } = await supabase.from("tasks").delete().eq("id", taskId);
+
+    if (error) {
+      setUsingLocalData(true);
+      Alert.alert("Aviso", "Exclusão feita apenas no aparelho. Verifique o Supabase.");
+    } else {
+      setUsingLocalData(false);
+    }
+
+    // Remove da interface local depois da tentativa de exclusão.
     setTasks((currentTasks) => currentTasks.filter((task) => task.id !== taskId));
     setSelectedTaskId(null);
     setScreen("home");
   }
 
   function handleLogout() {
+    // Como o login é simulado, sair apenas limpa o usuário e volta ao início.
     setUser(null);
     setSelectedTaskId(null);
     setScreen("login");
@@ -147,6 +237,7 @@ export default function App() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
       <StatusBar barStyle={settings.darkMode ? "light-content" : "dark-content"} />
 
+      {/* Renderização condicional: apenas a tela escolhida pelo estado screen aparece. */}
       {screen === "login" && (
         <LoginScreen
           theme={theme}
@@ -168,6 +259,8 @@ export default function App() {
           theme={theme}
           user={user}
           tasks={tasks}
+          loadingTasks={loadingTasks}
+          usingLocalData={usingLocalData}
           onAdd={() => setScreen("add")}
           onOpenTask={(taskId) => {
             setSelectedTaskId(taskId);
@@ -209,12 +302,20 @@ export default function App() {
 }
 
 function LoginScreen({ theme, onLogin, onGoToRegister }) {
+  // Tela inicial do aplicativo. Ela usa TextInput, TouchableOpacity, Image e navegação
+  // por callback para entrar ou ir ao cadastro.
+
   // Cada TextInput precisa de um state para armazenar o que o usuário digitou.
   const [email, setEmail] = useState("aluno@faculdade.com");
 
   return (
     <ScrollView contentContainerStyle={styles.centeredContent}>
-      <Image source={{ uri: APP_IMAGE }} style={styles.heroImage} resizeMode="contain" />
+      <View style={styles.loginCard}>
+        <Image source={{ uri: APP_IMAGE }} style={styles.heroImage} resizeMode="contain" />
+        <View style={styles.heroBadge}>
+          <Text style={styles.heroBadgeText}>✓</Text>
+        </View>
+      </View>
 
       <Text style={[styles.title, { color: theme.text }]}>OrganizaTarefas</Text>
       <Text style={[styles.subtitle, { color: theme.muted }]}>
@@ -223,7 +324,10 @@ function LoginScreen({ theme, onLogin, onGoToRegister }) {
 
       <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
       <TextInput
-        style={[styles.input, { borderColor: theme.border, color: theme.text }]}
+        style={[
+          styles.input,
+          { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
+        ]}
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
@@ -233,7 +337,7 @@ function LoginScreen({ theme, onLogin, onGoToRegister }) {
       />
 
       <View style={styles.buttonGap}>
-        <Button title="Entrar" color={theme.primary} onPress={() => onLogin(email)} />
+        <AppButton title="Entrar" theme={theme} onPress={() => onLogin(email)} />
       </View>
 
       <TouchableOpacity onPress={onGoToRegister} style={styles.textButton}>
@@ -244,6 +348,8 @@ function LoginScreen({ theme, onLogin, onGoToRegister }) {
 }
 
 function RegisterScreen({ theme, onRegister, onBack }) {
+  // Tela de cadastro simplificada. Não grava usuário no banco, porque o foco
+  // do trabalho é a lista de tarefas e a conexão simples com Supabase.
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
 
@@ -253,7 +359,10 @@ function RegisterScreen({ theme, onRegister, onBack }) {
 
       <Text style={[styles.label, { color: theme.text }]}>Nome</Text>
       <TextInput
-        style={[styles.input, { borderColor: theme.border, color: theme.text }]}
+        style={[
+          styles.input,
+          { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
+        ]}
         value={name}
         onChangeText={setName}
         placeholder="Seu nome"
@@ -262,7 +371,10 @@ function RegisterScreen({ theme, onRegister, onBack }) {
 
       <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
       <TextInput
-        style={[styles.input, { borderColor: theme.border, color: theme.text }]}
+        style={[
+          styles.input,
+          { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
+        ]}
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
@@ -271,16 +383,28 @@ function RegisterScreen({ theme, onRegister, onBack }) {
         placeholderTextColor={theme.muted}
       />
 
-      <Button
+      <AppButton
         title="Cadastrar e entrar"
-        color={theme.primary}
+        theme={theme}
         onPress={() => onRegister(name, email)}
       />
     </ScrollView>
   );
 }
 
-function HomeScreen({ theme, user, tasks, onAdd, onOpenTask, onSettings, onLogout }) {
+function HomeScreen({
+  theme,
+  user,
+  tasks,
+  loadingTasks,
+  usingLocalData,
+  onAdd,
+  onOpenTask,
+  onSettings,
+  onLogout,
+}) {
+  // Tela principal. Mostra resumo, estado da conexão e lista de tarefas.
+
   // Estatísticas calculadas a partir das tarefas atuais.
   const finishedCount = tasks.filter((task) => task.done).length;
   const pendingCount = tasks.length - finishedCount;
@@ -295,25 +419,47 @@ function HomeScreen({ theme, user, tasks, onAdd, onOpenTask, onSettings, onLogou
           </View>
 
           <TouchableOpacity onPress={onSettings} style={styles.roundButton}>
-            <Text style={styles.roundButtonText}>⚙</Text>
+            <Text style={styles.roundButtonText}>•••</Text>
           </TouchableOpacity>
         </View>
 
         <View style={[styles.summaryBox, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.summaryNumber, { color: theme.primary }]}>{tasks.length}</Text>
-          <Text style={[styles.summaryText, { color: theme.text }]}>tarefas no total</Text>
-          <Text style={[styles.smallText, { color: theme.muted }]}>
-            {finishedCount} concluídas • {pendingCount} pendentes
-          </Text>
+          <View style={styles.summaryTopRow}>
+            <View>
+              <Text style={[styles.summaryNumber, { color: theme.primary }]}>{tasks.length}</Text>
+              <Text style={[styles.summaryText, { color: theme.text }]}>tarefas no total</Text>
+            </View>
+            <View style={styles.progressCircle}>
+              <Text style={styles.progressText}>{finishedCount}</Text>
+            </View>
+          </View>
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${tasks.length ? (finishedCount / tasks.length) * 100 : 0}%` },
+              ]}
+            />
+          </View>
+          <View style={styles.summaryFooter}>
+            <Text style={[styles.smallText, { color: theme.muted }]}>
+              {finishedCount} concluídas • {pendingCount} pendentes
+            </Text>
+            <Text style={[styles.statusText, { color: usingLocalData ? theme.danger : theme.primary }]}>
+              {loadingTasks ? "Carregando" : usingLocalData ? "Modo local" : "Online"}
+            </Text>
+          </View>
         </View>
 
         <View style={styles.rowBetween}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Minhas tarefas</Text>
-          <Button title="Adicionar" color={theme.primary} onPress={onAdd} />
+          <AppButton title="+ Nova" theme={theme} onPress={onAdd} compact />
         </View>
       </View>
 
       <FlatList
+        // FlatList é usada porque ela é o componente recomendado para listas
+        // em React Native, principalmente quando podem existir muitos itens.
         data={tasks}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
@@ -330,7 +476,7 @@ function HomeScreen({ theme, user, tasks, onAdd, onOpenTask, onSettings, onLogou
             <View style={styles.taskRow}>
               <Text style={[styles.taskTitle, { color: theme.text }]}>{item.title}</Text>
               <Text style={[styles.badge, item.done ? styles.doneBadge : styles.pendingBadge]}>
-                {item.done ? "Concluída" : "Pendente"}
+                {item.done ? "OK" : "Aberta"}
               </Text>
             </View>
 
@@ -342,13 +488,14 @@ function HomeScreen({ theme, user, tasks, onAdd, onOpenTask, onSettings, onLogou
       />
 
       <View style={styles.footer}>
-        <Button title="Sair" color={theme.danger} onPress={onLogout} />
+        <AppButton title="Sair" theme={theme} onPress={onLogout} variant="danger" />
       </View>
     </View>
   );
 }
 
 function AddTaskScreen({ theme, onSave, onBack }) {
+  // Tela de criação. Cada campo do formulário é controlado por useState.
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
@@ -358,7 +505,10 @@ function AddTaskScreen({ theme, onSave, onBack }) {
 
       <Text style={[styles.label, { color: theme.text }]}>Título</Text>
       <TextInput
-        style={[styles.input, { borderColor: theme.border, color: theme.text }]}
+        style={[
+          styles.input,
+          { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
+        ]}
         value={title}
         onChangeText={setTitle}
         placeholder="Ex.: Estudar React Native"
@@ -370,7 +520,7 @@ function AddTaskScreen({ theme, onSave, onBack }) {
         style={[
           styles.input,
           styles.textArea,
-          { borderColor: theme.border, color: theme.text },
+          { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
         ]}
         value={description}
         onChangeText={setDescription}
@@ -379,9 +529,9 @@ function AddTaskScreen({ theme, onSave, onBack }) {
         multiline
       />
 
-      <Button
+      <AppButton
         title="Salvar tarefa"
-        color={theme.primary}
+        theme={theme}
         onPress={() => onSave(title, description)}
       />
     </ScrollView>
@@ -389,6 +539,8 @@ function AddTaskScreen({ theme, onSave, onBack }) {
 }
 
 function TaskDetailsScreen({ theme, task, onSave, onDelete, onBack }) {
+  // Tela de edição. Ela recebe a tarefa selecionada e inicia o formulário
+  // com os valores atuais dessa tarefa.
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [done, setDone] = useState(task.done);
@@ -399,7 +551,10 @@ function TaskDetailsScreen({ theme, task, onSave, onDelete, onBack }) {
 
       <Text style={[styles.label, { color: theme.text }]}>Título</Text>
       <TextInput
-        style={[styles.input, { borderColor: theme.border, color: theme.text }]}
+        style={[
+          styles.input,
+          { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
+        ]}
         value={title}
         onChangeText={setTitle}
       />
@@ -409,7 +564,7 @@ function TaskDetailsScreen({ theme, task, onSave, onDelete, onBack }) {
         style={[
           styles.input,
           styles.textArea,
-          { borderColor: theme.border, color: theme.text },
+          { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
         ]}
         value={description}
         onChangeText={setDescription}
@@ -422,19 +577,25 @@ function TaskDetailsScreen({ theme, task, onSave, onDelete, onBack }) {
       </View>
 
       <View style={styles.buttonGap}>
-        <Button
+        <AppButton
           title="Salvar alterações"
-          color={theme.primary}
+          theme={theme}
           onPress={() => onSave({ ...task, title, description, done })}
         />
       </View>
 
-      <Button title="Excluir tarefa" color={theme.danger} onPress={() => onDelete(task.id)} />
+      <AppButton
+        title="Excluir tarefa"
+        theme={theme}
+        onPress={() => onDelete(task.id)}
+        variant="danger"
+      />
     </ScrollView>
   );
 }
 
 function SettingsScreen({ theme, settings, onChangeSettings, onBack }) {
+  // Tela de configurações. Demonstra o uso de Switch e de estado booleano.
   return (
     <ScrollView contentContainerStyle={styles.screenContent}>
       <Header title="Configurações" theme={theme} onBack={onBack} />
@@ -473,6 +634,7 @@ function SettingsScreen({ theme, settings, onChangeSettings, onBack }) {
 }
 
 function Header({ title, theme, onBack }) {
+  // Cabeçalho reutilizável usado nas telas internas.
   return (
     <View style={styles.header}>
       <TouchableOpacity onPress={onBack} style={styles.backButton}>
@@ -483,27 +645,54 @@ function Header({ title, theme, onBack }) {
   );
 }
 
+function AppButton({ title, theme, onPress, variant = "primary", compact = false }) {
+  // Botão customizado com TouchableOpacity para permitir o visual do protótipo:
+  // cantos arredondados, cor cheia e sombra suave. O Button nativo foi evitado
+  // aqui porque ele oferece pouca personalização de estilo.
+  const isDanger = variant === "danger";
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.82}
+      onPress={onPress}
+      style={[
+        styles.appButton,
+        compact && styles.compactButton,
+        { backgroundColor: isDanger ? theme.danger : theme.primary },
+      ]}
+    >
+      <Text style={styles.appButtonText}>{title}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const lightTheme = {
-  background: "#f8fafc",
+  // Tema claro inspirado no PNG do Figma: fundo suave, cards brancos e azul vivo.
+  background: "#f7f8fc",
   surface: "#ffffff",
-  text: "#0f172a",
-  muted: "#64748b",
-  border: "#cbd5e1",
-  primary: "#0f766e",
-  danger: "#b91c1c",
+  input: "#ffffff",
+  text: "#20212a",
+  muted: "#828693",
+  border: "#e4e7ef",
+  primary: "#0877f2",
+  danger: "#ef4444",
 };
 
 const darkTheme = {
-  background: "#111827",
-  surface: "#1f2937",
+  // Tema escuro usado para demonstrar personalização visual pelo usuário.
+  background: "#11131a",
+  surface: "#1d2230",
+  input: "#202638",
   text: "#f9fafb",
-  muted: "#cbd5e1",
-  border: "#475569",
-  primary: "#14b8a6",
+  muted: "#b8bfcc",
+  border: "#333a49",
+  primary: "#3593ff",
   danger: "#f87171",
 };
 
 const styles = StyleSheet.create({
+  // StyleSheet concentra todos os estilos do aplicativo. Isso evita repetir
+  // objetos de estilo grandes dentro do JSX e deixa a apresentação mais clara.
   safeArea: {
     flex: 1,
   },
@@ -513,45 +702,81 @@ const styles = StyleSheet.create({
   centeredContent: {
     flexGrow: 1,
     justifyContent: "center",
-    padding: 24,
+    padding: 26,
   },
   screenContent: {
     padding: 24,
   },
+  loginCard: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: "#e8f1ff",
+    borderRadius: 28,
+    height: 118,
+    justifyContent: "center",
+    marginBottom: 28,
+    shadowColor: "#0877f2",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.15,
+    shadowRadius: 28,
+    width: 118,
+  },
   heroImage: {
-    width: "100%",
-    height: 160,
-    marginBottom: 24,
+    backgroundColor: "#b7dcff",
+    borderRadius: 20,
+    height: 54,
+    width: 54,
+  },
+  heroBadge: {
+    alignItems: "center",
+    backgroundColor: "#0877f2",
+    borderRadius: 16,
+    bottom: 18,
+    height: 32,
+    justifyContent: "center",
+    position: "absolute",
+    right: 18,
+    width: 32,
+  },
+  heroBadgeText: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "800",
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
-    marginBottom: 6,
+    fontSize: 31,
+    fontWeight: "800",
+    letterSpacing: 0,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    lineHeight: 22,
-    marginBottom: 24,
+    lineHeight: 24,
+    marginBottom: 28,
   },
   label: {
-    fontSize: 15,
-    fontWeight: "600",
+    fontSize: 14,
+    fontWeight: "700",
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 14,
     fontSize: 16,
-    marginBottom: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    marginBottom: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.04,
+    shadowRadius: 18,
   },
   textArea: {
     minHeight: 120,
     textAlignVertical: "top",
   },
   buttonGap: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   textButton: {
     alignItems: "center",
@@ -564,11 +789,14 @@ const styles = StyleSheet.create({
   header: {
     alignItems: "center",
     flexDirection: "row",
-    marginBottom: 24,
+    marginBottom: 28,
   },
   backButton: {
-    paddingRight: 16,
-    paddingVertical: 8,
+    backgroundColor: "#edf4ff",
+    borderRadius: 18,
+    marginRight: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
   },
   backButtonText: {
     fontSize: 16,
@@ -576,7 +804,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   homeHeader: {
     alignItems: "center",
@@ -586,22 +814,29 @@ const styles = StyleSheet.create({
   },
   roundButton: {
     alignItems: "center",
-    backgroundColor: "#e2e8f0",
-    borderRadius: 22,
-    height: 44,
+    backgroundColor: "#e7effb",
+    borderRadius: 20,
+    height: 40,
     justifyContent: "center",
-    width: 44,
+    width: 40,
   },
   roundButtonText: {
-    fontSize: 22,
+    color: "#0877f2",
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: -5,
   },
   summaryBox: {
-    borderRadius: 8,
-    marginBottom: 22,
-    padding: 18,
+    borderRadius: 20,
+    marginBottom: 24,
+    padding: 20,
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.08,
+    shadowRadius: 28,
   },
   summaryNumber: {
-    fontSize: 34,
+    fontSize: 40,
     fontWeight: "800",
   },
   summaryText: {
@@ -611,6 +846,49 @@ const styles = StyleSheet.create({
   },
   smallText: {
     fontSize: 14,
+    lineHeight: 20,
+  },
+  statusText: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  summaryTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  progressCircle: {
+    alignItems: "center",
+    backgroundColor: "#e8f1ff",
+    borderColor: "#0877f2",
+    borderRadius: 25,
+    borderWidth: 5,
+    height: 50,
+    justifyContent: "center",
+    width: 50,
+  },
+  progressText: {
+    color: "#0877f2",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  progressTrack: {
+    backgroundColor: "#e8ebf3",
+    borderRadius: 999,
+    height: 8,
+    marginTop: 18,
+    overflow: "hidden",
+  },
+  progressFill: {
+    backgroundColor: "#0877f2",
+    borderRadius: 999,
+    height: 8,
+  },
+  summaryFooter: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 14,
   },
   rowBetween: {
     alignItems: "center",
@@ -619,16 +897,20 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   listContent: {
     paddingHorizontal: 24,
     paddingBottom: 16,
   },
   taskCard: {
-    borderRadius: 8,
-    marginBottom: 12,
+    borderRadius: 18,
+    marginBottom: 14,
     padding: 16,
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.06,
+    shadowRadius: 22,
   },
   taskRow: {
     alignItems: "center",
@@ -639,7 +921,7 @@ const styles = StyleSheet.create({
   taskTitle: {
     flex: 1,
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: "800",
     marginRight: 8,
   },
   taskDescription: {
@@ -655,12 +937,12 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   doneBadge: {
-    backgroundColor: "#dcfce7",
-    color: "#166534",
+    backgroundColor: "#e8f1ff",
+    color: "#0877f2",
   },
   pendingBadge: {
-    backgroundColor: "#fef3c7",
-    color: "#92400e",
+    backgroundColor: "#f0f2f7",
+    color: "#828693",
   },
   emptyText: {
     fontSize: 16,
@@ -679,14 +961,38 @@ const styles = StyleSheet.create({
   },
   settingsItem: {
     alignItems: "center",
-    borderRadius: 8,
+    borderRadius: 18,
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 12,
     padding: 16,
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.06,
+    shadowRadius: 22,
   },
   settingsText: {
     flex: 1,
     paddingRight: 12,
+  },
+  appButton: {
+    alignItems: "center",
+    borderRadius: 14,
+    justifyContent: "center",
+    minHeight: 52,
+    paddingHorizontal: 18,
+    shadowColor: "#0877f2",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+  },
+  compactButton: {
+    minHeight: 38,
+    paddingHorizontal: 16,
+  },
+  appButtonText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "800",
   },
 });

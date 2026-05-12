@@ -12,7 +12,7 @@ O projeto usa React Native com Expo e simula um aplicativo de gerenciamento de t
 - Tela para adicionar tarefa.
 - Tela de detalhes para editar, concluir ou excluir tarefa.
 - Tela de configurações com modo escuro e notificações.
-- Uso de `View`, `Text`, `TextInput`, `Button`, `FlatList`, `Image`, `Switch` e layout com Flexbox.
+- Uso de `View`, `Text`, `TextInput`, `TouchableOpacity`, `FlatList`, `Image`, `Switch` e layout com Flexbox.
 - Navegação entre telas usando estado do React.
 
 ## Como executar
@@ -34,6 +34,9 @@ Depois disso, é possível abrir no celular com o aplicativo Expo Go ou executar
 ## Estrutura principal
 
 - `App.js`: contém todas as telas e regras do aplicativo.
+- `src/lib/supabase.js`: cria a conexão do app com o Supabase.
+- `supabase/tasks.sql`: script SQL da tabela usada pelo aplicativo.
+- `APRESENTACAO.md`: roteiro completo para explicar o projeto.
 - `package.json`: lista dependências e comandos do projeto.
 - `app.json`: configurações básicas do Expo.
 - `babel.config.js`: configuração usada pelo Expo para compilar o app.
@@ -61,9 +64,40 @@ Preencha com os nomes do grupo:
 
 ## Banco de dados
 
-Nesta versão, os dados ficam em memória usando `useState`, para deixar o código mais simples para estudo.
+O projeto tem uma conexão simples com Supabase para salvar, listar, editar e excluir tarefas.
 
-Para ganhar o ponto extra de banco de dados, uma melhoria possível é integrar Firebase, Supabase ou Appwrite. A ideia seria substituir as funções `handleAddTask`, `handleUpdateTask` e `handleDeleteTask` por chamadas ao banco de dados.
+Crie a tabela abaixo no SQL Editor do Supabase ou execute o arquivo `supabase/tasks.sql`:
+
+```sql
+create table if not exists public.tasks (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  description text not null default 'Sem descrição.',
+  done boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+alter table public.tasks enable row level security;
+
+create policy "Permitir leitura publica de tarefas"
+on public.tasks for select
+using (true);
+
+create policy "Permitir criacao publica de tarefas"
+on public.tasks for insert
+with check (true);
+
+create policy "Permitir edicao publica de tarefas"
+on public.tasks for update
+using (true)
+with check (true);
+
+create policy "Permitir exclusao publica de tarefas"
+on public.tasks for delete
+using (true);
+```
+
+O app usa apenas a chave pública do Supabase. Nunca coloque a chave `service_role` dentro do aplicativo.
 
 ## Capturas de tela
 
