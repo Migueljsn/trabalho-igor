@@ -26,10 +26,36 @@ npm install
 Inicie o projeto:
 
 ```bash
-npm start
+npm run dev
 ```
 
 Depois disso, é possível abrir no celular com o aplicativo Expo Go ou executar no navegador usando a opção para web do Expo.
+
+## Deploy no EasyPanel
+
+Este é um projeto Expo/React Native. Para publicar como site no EasyPanel, ele precisa ser exportado para web e servido como arquivos estáticos.
+
+Use o deploy com Nixpacks. O arquivo `nixpacks.toml` já define:
+
+- Node 20, necessário para as versões atuais do Supabase.
+- `npm ci` para instalar as dependências.
+- `npm run build` para gerar a pasta `dist`.
+- `npm run start` para servir a pasta `dist` em `0.0.0.0:$PORT`.
+
+No EasyPanel, mantenha o app como Nixpacks e faça redeploy do commit mais recente. Se precisar configurar manualmente:
+
+```bash
+Build command: npm run build
+Start command: npm run start
+Port: usar a variável PORT do EasyPanel
+```
+
+Para testar localmente o mesmo fluxo de produção:
+
+```bash
+npm run build
+PORT=3000 npm run start
+```
 
 ## Estrutura principal
 

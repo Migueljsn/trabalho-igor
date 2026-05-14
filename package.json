@@ -3,8 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "main": "node_modules/expo/AppEntry.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "expo start",
+    "dev": "expo start",
+    "start": "serve dist -s -l tcp://0.0.0.0:${PORT:-3000}",
+    "build": "expo export --platform web --output-dir dist",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"
@@ -17,7 +22,8 @@
     "react-dom": "18.2.0",
     "react-native": "0.74.5",
     "react-native-url-polyfill": "^3.0.0",
-    "react-native-web": "~0.19.10"
+    "react-native-web": "~0.19.10",
+    "serve": "^14.2.6"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0"
