@@ -2,6 +2,14 @@
 
 Aplicativo criado para o trabalho final da disciplina de Desenvolvimento para Dispositivos Móveis.
 
+Alunos: 
+
+Luís Guilherme de Oliveira Caminha Leal - 01800544
+Heryck Bryan Oliveira Pacheco - 01801743
+Diego Guimarães marinho - 01776415
+Ana Jéssica Siqueira Silva Rocha - 01830519
+Miguel José de Sousa Neto - 01824955
+
 O projeto usa React Native com Expo e simula um aplicativo de gerenciamento de tarefas. O código está comentado para facilitar o estudo e a apresentação.
 
 ## Funcionalidades
